@@ -15,6 +15,89 @@ using namespace cv;
  * 
  * 
  * */
+bool ImgstringToLRandNUM(cv::String img_name, int *LoR, int *num)
+{
+    std::vector<int> dot_place;
+    std::string img_num;
+     for(int j=0; j< img_name.length(); j++)
+        {
+            
+            if(img_name[j]=='.')
+            {
+                dot_place.push_back(j);
+            }
+        }
+        if(dot_place.empty())
+        {
+            cout<<"WARNING:"<<img_name<<" has 0 dot"<<endl;
+            return false;
+        }
+        if(img_name[dot_place[0]+1] == 'l')
+        {*LoR = 1;}
+        if(img_name[dot_place[0]+1] == 'r')
+        {*LoR = 0;}
+        for(int j =0; j<(dot_place[2]-dot_place[1]-1); j++)
+        {
+            img_num[j] = img_name[dot_place[1]+1+j];
+        }
+         *num  = std::stoi (img_num,nullptr);
+        
+        return true;
+}
+
+bool Folder2LRimg(std::string folder, std::vector<std::string> *img_left, std::vector<std::string> *img_right, int NUM)
+{
+    vector<cv::String> img_string;
+    vector<int> left_or_right; //left = 0; right = 1;
+    vector<int> img_number_left,img_number_right;
+    std::vector<cv::String> img_left_temp(NUM);
+    std::vector<cv::String> img_right_temp(NUM);
+    cv::glob(folder, img_string, false);
+    cv::String img_name;
+    vector<int> dot_palce;
+    int LoR, img_num;
+    
+    for (int i=0; i<img_string.size(); i++)
+    {
+    
+        {
+        img_name = img_string[i];
+        ImgstringToLRandNUM(img_name, &LoR, &img_num);
+        img_num = img_num - 600;
+        if(LoR == 1)//left
+        {
+            if(img_num<NUM)
+            {
+            img_left_temp[img_num] = img_name;
+            }
+        }
+        else
+        {
+            if(img_num<NUM)
+            {
+            img_right_temp[img_num] = (img_name);
+            }
+        }
+        
+        }
+    }
+    for(int i =0; i< NUM; i++)
+    {
+        if( img_left_temp[i].empty() || img_right_temp[i].empty())
+        {
+            img_left_temp.erase(img_left_temp.begin()+i);
+            img_right_temp.erase(img_left_temp.begin()+i);
+            i=i-1;
+        }
+        else
+        {
+        img_left->push_back( img_left_temp[i]);
+        img_right->push_back(img_right_temp[i]);         
+        }
+    }
+
+}
+
 
 bool PixelPair23dPoint(stereo_camera camera, cv::Point2d point_left, cv::Point2d point_right,Eigen::Vector3d *points_3d)
 {
@@ -149,13 +232,13 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
     double curr_point[3];
     double rotate_R[4];
     double transpose_T[3];
-    rotate_R[0] = 0.001;
-    rotate_R[1] = 0.001;
-    rotate_R[2] = 0.001;
-    rotate_R[3] = 0.001;
-    transpose_T[0] = 0.001;
-    transpose_T[1] = 0.001;
-    transpose_T[2] = 0.001;
+    rotate_R[0] = 0.000001;
+    rotate_R[1] = 0.000001;
+    rotate_R[2] = 0.000001;
+    rotate_R[3] = 0.000001;
+    transpose_T[0] = 0.000001;
+    transpose_T[1] = 0.000001;
+    transpose_T[2] = 0.000001;
     for(int i=0; i < points_3d_prev.size(); i++)
     {
         prev_point[0] = points_3d_prev[i](0);
@@ -170,10 +253,10 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
     ceres::Solver::Options options;
     options.linear_solver_type = ceres::DENSE_SCHUR;
     options.max_num_iterations = 1000;
-    //    options.minimizer_progress_to_stdout = true;
+    options.minimizer_progress_to_stdout = true;
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
-    //  cout<<summary.FullReport()<<endl;
+    cout<<summary.FullReport()<<endl;
     double rotation_matrix[9];
     ceres::QuaternionToRotation(rotate_R, rotation_matrix);
     Eigen::Matrix<double,3,3> pose_rotation;
@@ -186,15 +269,14 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
             pose_rotation(i,j) = rotation_matrix[3*i+j];
         }
     }
-    cout<<"The rotation matrix"<<pose_rotation<<endl;
-    cout<<"The transpose"<<pose_tranpose<<endl;
     std::vector<Eigen::Vector3d> points_previous_frame;
     std::vector<Eigen::Vector4d> points_prev_homo;
     Eigen::Vector3d prev_point_3d;
     Eigen::Vector4d prev_point_4d;
-    for(int i=0; i < points_3d_curr.size(); i++)
+    for(int i=0; i < points_3d_prev.size(); i++)
     {
-        prev_point_3d = pose_rotation.inverse()*(points_3d_curr[i]-pose_tranpose);
+       // prev_point_3d = pose_rotation.inverse()*(points_3d_curr[i]-pose_tranpose);
+        prev_point_3d = points_3d_prev[i];
         prev_point_4d.block(0,0,3,1) = prev_point_3d;
         prev_point_4d(3) = 1;
         points_prev_homo.push_back(prev_point_4d);
@@ -207,10 +289,14 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
             HomoCurr2Prev(i,j) = 0;
         }
     }
+    HomoCurr2Prev(3,3) = 1;
     HomoCurr2Prev.block(0,0,3,3) = pose_rotation.inverse();
     HomoCurr2Prev.block(0,3,3,1) = pose_tranpose*(-1.0);
     *Curr2Prev = HomoCurr2Prev;
-    *points_prev =  points_prev_homo;
+    for(int i =0; i< points_prev_homo.size(); i++)
+    {
+    points_prev->push_back(  points_prev_homo[i]);
+    }
     return true;
 }
 

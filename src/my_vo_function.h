@@ -87,6 +87,9 @@ public:
     double pixel_size;
 };
 
+bool ImgstringToLRandNUM(cv::String img_name, int *LoR, int *num);
+
+bool Folder2LRimg(std::string folder, std::vector<std::string> *img_left, std::vector<std::string> *img_right, int NUM);
 bool PixelPair23dPoint(stereo_camera camera, cv::Point2f point_left, cv::Point2f point_right,Eigen::Vector3d *points_3d);
 
 

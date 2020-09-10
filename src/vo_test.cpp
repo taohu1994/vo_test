@@ -69,24 +69,37 @@ int main(int argc, char** argv)
     std::vector<Eigen::Vector4d> points_prev;
     Eigen::Matrix<double,4,4> Curr2Prev;
     pcl::PointXYZ pointxyz;
-    img_previous_left = cv::imread("../img/wean_wide_interesting.left-rectified.00000600.t_001268594688.921905.png",IMREAD_GRAYSCALE );
-    img_previous_right = cv::imread("../img/wean_wide_interesting.right-rectified.00000600.t_001268594688.921905.png",IMREAD_GRAYSCALE );
-    img_current_left = cv::imread("../img/wean_wide_interesting.left-rectified.00000601.t_001268594688.992430.png", IMREAD_GRAYSCALE);
-    img_current_right = cv::imread("../img/wean_wide_interesting.right-rectified.00000601.t_001268594688.992430.png", IMREAD_GRAYSCALE);
+    std::vector<std::string> img_name_left;
+    std::vector<std::string> img_name_right;
+    Folder2LRimg("/home/thomas/Desktop/SLAM/wean_hall/wean_rectified_images/wean/images/rectified/*.png",&img_name_left,&img_name_right,5);
+    for(int i =0; i<img_name_left.size()-1;i++)
+    {
+    img_previous_left = cv::imread(img_name_left[i],IMREAD_GRAYSCALE );
+    img_previous_right = cv::imread(img_name_right[i],IMREAD_GRAYSCALE );
+    img_current_left = cv::imread(img_name_left[i+1], IMREAD_GRAYSCALE);
+    img_current_right = cv::imread(img_name_right[i+1], IMREAD_GRAYSCALE);
+    points_prev.clear();
+    
     if(TwoFramesImagesToCloudPoints( img_previous_left, img_previous_right, img_current_left,  img_current_right, camera, &points_prev, &Curr2Prev)==true)
     {
-        Homo2world = Homo2world*Curr2Prev; // update homography
-        for(int i=0; i < points_prev.size(); i++)
+        cout<<"Curr2Prev"<<Curr2Prev<<endl;
+        cout<<points_prev[0]<<endl;
+        
+         // update homography
+        for(int j=0; j < points_prev.size(); j++)
         {
-            
-            if(PointXYZ2Vector3d(&pointxyz, Homo2world*points_prev[i])==true)
+            if(PointXYZ2Vector3d(&pointxyz, Homo2world*points_prev[j])==true)
             {
+                
+               
                 cloud_ptr->push_back(pointxyz);
             }
         }
+        Homo2world = Homo2world*Curr2Prev;
+          cout<<cloud_ptr->size()<<endl;
     }
-    
-
+  
+    }
     
     
     
