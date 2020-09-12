@@ -30,7 +30,7 @@ int main(int argc, char** argv)
     cv::Mat test_left = cv::imread("/home/thomas/Desktop/SLAM/vo_test/test_left.png",0);
     cv::Mat test_right = cv::imread("/home/thomas/Desktop/SLAM/vo_test/test_right.png",0);
     stereo_camera camera;
-    double focal_length = 487.109*pow(10,-6);
+    double focal_length = 487.109*pow(10,-5);
     double baseline = 0.120006;
     double principle_x = 320.788;
     double principle_y = 245.845;
@@ -39,7 +39,7 @@ int main(int argc, char** argv)
     camera.focal_length = focal_length;
     camera.baseline = baseline;
     camera.instrinct_matrix = K;
-    camera.pixel_size = pow(10,-5);
+    camera.pixel_size = 7.4*pow(10,-5);
     std::vector<Eigen::Vector4d> points_cloud_temp;
     InitialCameraAndPointCloud(test_left, test_right, &camera, &points_cloud_temp);
     // Init state
@@ -71,9 +71,10 @@ int main(int argc, char** argv)
     pcl::PointXYZ pointxyz;
     std::vector<std::string> img_name_left;
     std::vector<std::string> img_name_right;
-    Folder2LRimg("/home/thomas/Desktop/SLAM/wean_hall/wean_rectified_images/wean/images/rectified/*.png",&img_name_left,&img_name_right,5);
+    Folder2LRimg("/home/thomas/Desktop/SLAM/wean_hall/wean_rectified_images/wean/images/rectified/*.png",&img_name_left,&img_name_right,3);
     for(int i =0; i<img_name_left.size()-1;i++)
     {
+        cout<<"Current Frame:"<<i<<endl;
     img_previous_left = cv::imread(img_name_left[i],IMREAD_GRAYSCALE );
     img_previous_right = cv::imread(img_name_right[i],IMREAD_GRAYSCALE );
     img_current_left = cv::imread(img_name_left[i+1], IMREAD_GRAYSCALE);
@@ -82,9 +83,6 @@ int main(int argc, char** argv)
     
     if(TwoFramesImagesToCloudPoints( img_previous_left, img_previous_right, img_current_left,  img_current_right, camera, &points_prev, &Curr2Prev)==true)
     {
-        cout<<"Curr2Prev"<<Curr2Prev<<endl;
-        cout<<points_prev[0]<<endl;
-        
          // update homography
         for(int j=0; j < points_prev.size(); j++)
         {
@@ -96,7 +94,7 @@ int main(int argc, char** argv)
             }
         }
         Homo2world = Homo2world*Curr2Prev;
-          cout<<cloud_ptr->size()<<endl;
+          cout<<"Point cloud size:"<<cloud_ptr->size()<<endl;
     }
   
     }

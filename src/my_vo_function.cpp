@@ -6,6 +6,7 @@ using namespace cv;
 
 
 
+//bool RANSAC_3D3D(cv::)
 
 /*function PixelPair23dPoint transfer the matched pairs of left and right pixel points to 3d points
  * 
@@ -105,25 +106,26 @@ bool PixelPair23dPoint(stereo_camera camera, cv::Point2d point_left, cv::Point2d
     double focal_length = camera.focal_length;
     double baseline = camera.baseline;
     double pixel_size = camera.pixel_size; 
+    double Cx = camera.instrinct_matrix(0,2);
+    double Cy = camera.instrinct_matrix(1,2);
     Eigen::Vector3d point_homo;
     //  double focal_length = camera_instrinct
     // double baseline = camera_instrinct(1,1)
-    double diff = double(point_left.x - point_right.x)*pixel_size;
-    double depth = focal_length*baseline/diff;
+    double diff = double(point_left.x - point_right.x);
+    double depth = focal_length*baseline/(diff*camera.pixel_size);
     Eigen::Vector3d point_3d;
-    if (depth > 0.1)
-    {
+
         point_homo(0) = point_left.x;
         point_homo(1) = point_left.y;
         point_homo(2) = 1.0;
-        *points_3d = depth*K.inverse()*point_homo;
+        point_3d(0) = (point_homo(0)*depth-Cx*depth)*pixel_size/focal_length;
+        point_3d(1) = (point_homo(1)*depth-Cy*depth)*pixel_size/focal_length;
+        point_3d(2) = depth;
+     //   cout<<"point_3d\n"<<point_3d<<endl;
+       // cout<<"K inverse\n"<<depth*K.inverse()*point_homo<<endl;
+        *points_3d = point_3d;
         //points_3d = &point_3d;
         return true;
-    }
-    else
-    {
-        return false;
-    }
 }
 
 
@@ -230,12 +232,25 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
     ceres::Problem problem;
     double prev_point[3];
     double curr_point[3];
-    double rotate_R[4];
+    
     double transpose_T[3];
-    rotate_R[0] = 0.000001;
-    rotate_R[1] = 0.000001;
-    rotate_R[2] = 0.000001;
-    rotate_R[3] = 0.000001;
+    /*double rotate_R[9];
+    rotate_R[0] = 1.0;
+    rotate_R[1] = 0.0000001;
+    rotate_R[2] = 0.0000001;
+    rotate_R[3] = 0.0000001;
+    rotate_R[4] = 1.0;
+    rotate_R[5] = 0.0000001;
+    rotate_R[6] = 0.0000001;
+    rotate_R[7] = 0.0000001;
+    rotate_R[8] = 1.0;*/
+    double rotate_R[4];
+    rotate_R[0] = 1.0;
+    rotate_R[1] = 0.0000001;
+    rotate_R[2] = 0.0000001;
+    rotate_R[3] = 0.0000001;;
+
+    
     transpose_T[0] = 0.000001;
     transpose_T[1] = 0.000001;
     transpose_T[2] = 0.000001;
@@ -252,32 +267,53 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
     }
     ceres::Solver::Options options;
     options.linear_solver_type = ceres::DENSE_SCHUR;
-    options.max_num_iterations = 1000;
-    options.minimizer_progress_to_stdout = true;
+    options.max_num_iterations = 10000;
+    options.gradient_tolerance = 1e-20;
+    //options.minimizer_progress_to_stdout = true;
     ceres::Solver::Summary summary;
     ceres::Solve(options, &problem, &summary);
-    cout<<summary.FullReport()<<endl;
-    double rotation_matrix[9];
-    ceres::QuaternionToRotation(rotate_R, rotation_matrix);
+    cout<<summary.BriefReport()<<endl;
     Eigen::Matrix<double,3,3> pose_rotation;
     Eigen::Vector3d pose_tranpose;
+    
+     double rotation_matrix[9];
+    ceres::QuaternionToRotation(rotate_R, rotation_matrix);
+    
     for(int i=0;i<=2;i++)
     {
         pose_tranpose(i) = transpose_T[i];
         for(int j=0;j<=2;j++)
         {
+            //pose_rotation(i,j) = rotate_R[3*i+j];
+            
             pose_rotation(i,j) = rotation_matrix[3*i+j];
         }
     }
-    std::vector<Eigen::Vector3d> points_previous_frame;
+    cout<<pose_tranpose<<endl;
+    cout<<pose_rotation<<endl;
+    //RANSAC outliner filtering
+    
+    for(int i=0; i<=points_3d_prev.size();i++)
+    {
+        
+    }
+    
+    
     std::vector<Eigen::Vector4d> points_prev_homo;
     Eigen::Vector3d prev_point_3d;
     Eigen::Vector4d prev_point_4d;
+    Eigen::Vector3d Project_error;
+    int project_error_sum = 0;
     for(int i=0; i < points_3d_prev.size(); i++)
     {
        // prev_point_3d = pose_rotation.inverse()*(points_3d_curr[i]-pose_tranpose);
         prev_point_3d = points_3d_prev[i];
-        prev_point_4d.block(0,0,3,1) = prev_point_3d;
+        Project_error = (pose_rotation*points_3d_prev[i]+pose_tranpose-points_3d_prev[i]);
+        project_error_sum += Project_error.norm();
+        cout<<"projection_error +T:"<<Project_error.norm()<<endl;
+        prev_point_4d(0) = prev_point_3d(0);
+        prev_point_4d(1) = prev_point_3d(1);
+        prev_point_4d(2) = prev_point_3d(2);
         prev_point_4d(3) = 1;
         points_prev_homo.push_back(prev_point_4d);
     }    
@@ -290,8 +326,8 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
         }
     }
     HomoCurr2Prev(3,3) = 1;
-    HomoCurr2Prev.block(0,0,3,3) = pose_rotation.inverse();
-    HomoCurr2Prev.block(0,3,3,1) = pose_tranpose*(-1.0);
+    HomoCurr2Prev.block(0,0,3,3) = pose_rotation;
+    HomoCurr2Prev.block(0,3,3,1) = pose_tranpose;
     *Curr2Prev = HomoCurr2Prev;
     for(int i =0; i< points_prev_homo.size(); i++)
     {
