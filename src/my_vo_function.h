@@ -90,9 +90,9 @@ struct ProjectionError_3d3d {
                         prev_poinst_replace[1] = T(prev_points_[1]);
                         prev_poinst_replace[2] = T(prev_points_[2]);
                         ceres::QuaternionRotatePoint(rotate_R,prev_poinst_replace,rotated_points);
-                        rotated_points[0] += T(transpose_T[0]);
-                        rotated_points[1] += T(transpose_T[1]);
-                        rotated_points[2] += T(transpose_T[2]);
+                        rotated_points[0] += (transpose_T[0]);
+                        rotated_points[1] += (transpose_T[1]);
+                        rotated_points[2] += (transpose_T[2]);
                         
                         T points_diff[3];
                         
@@ -127,6 +127,10 @@ public:
     double pixel_size;
 };
 
+bool RANSAC_3D3D(std::vector<Eigen::Vector3d> *points_3d_prev, std::vector<Eigen::Vector3d> *points_3d_curr, Eigen::Matrix<double,3,3> *pose_rotation, Eigen::Vector3d *pose_transpose,double *projection_error, int *inliner_number);
+
+
+bool ceres_modelfitting(std::vector<Eigen::Vector3d> points_3d_prev, std::vector<Eigen::Vector3d> points_3d_curr, Eigen::Matrix<double,3,3> *pose_rotation_return, Eigen::Vector3d *pose_transpose_return);
 bool ImgstringToLRandNUM(cv::String img_name, int *LoR, int *num);
 
 bool Folder2LRimg(std::string folder, std::vector<std::string> *img_left, std::vector<std::string> *img_right, int NUM);

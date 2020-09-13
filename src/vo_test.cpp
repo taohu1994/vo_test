@@ -26,6 +26,10 @@ int main(int argc, char** argv)
 {
     // laod image
     //Initial camera;
+    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer ("point cloud"));
+    viewer->setBackgroundColor(0,0,0);
+        viewer->addCoordinateSystem(1.0);
+    viewer->initCameraParameters();
     cout<<"Project visual odometry \n"<<"Initialization"<<endl;
     cv::Mat test_left = cv::imread("/home/thomas/Desktop/SLAM/vo_test/test_left.png",0);
     cv::Mat test_right = cv::imread("/home/thomas/Desktop/SLAM/vo_test/test_right.png",0);
@@ -71,55 +75,65 @@ int main(int argc, char** argv)
     pcl::PointXYZ pointxyz;
     std::vector<std::string> img_name_left;
     std::vector<std::string> img_name_right;
-    Folder2LRimg("/home/thomas/Desktop/SLAM/wean_hall/wean_rectified_images/wean/images/rectified/*.png",&img_name_left,&img_name_right,3);
+    Folder2LRimg("/home/thomas/Desktop/SLAM/wean_hall/wean_rectified_images/wean/images/rectified/*.png",&img_name_left,&img_name_right,10);
+    string string_print;
     for(int i =0; i<img_name_left.size()-1;i++)
     {
         cout<<"Current Frame:"<<i<<endl;
-    img_previous_left = cv::imread(img_name_left[i],IMREAD_GRAYSCALE );
-    img_previous_right = cv::imread(img_name_right[i],IMREAD_GRAYSCALE );
-    img_current_left = cv::imread(img_name_left[i+1], IMREAD_GRAYSCALE);
-    img_current_right = cv::imread(img_name_right[i+1], IMREAD_GRAYSCALE);
-    points_prev.clear();
-    
-    if(TwoFramesImagesToCloudPoints( img_previous_left, img_previous_right, img_current_left,  img_current_right, camera, &points_prev, &Curr2Prev)==true)
-    {
-         // update homography
-        for(int j=0; j < points_prev.size(); j++)
+        img_previous_left = cv::imread(img_name_left[i],IMREAD_GRAYSCALE );
+        img_previous_right = cv::imread(img_name_right[i],IMREAD_GRAYSCALE );
+        img_current_left = cv::imread(img_name_left[i+1], IMREAD_GRAYSCALE);
+        img_current_right = cv::imread(img_name_right[i+1], IMREAD_GRAYSCALE);
+        points_prev.clear();
+        
+        if(TwoFramesImagesToCloudPoints( img_previous_left, img_previous_right, img_current_left,  img_current_right, camera, &points_prev, &Curr2Prev)==true)
         {
-            if(PointXYZ2Vector3d(&pointxyz, Homo2world*points_prev[j])==true)
+            // update homography
+            for(int j=0; j < points_prev.size(); j++)
             {
-                
-               
-                cloud_ptr->push_back(pointxyz);
+                if(PointXYZ2Vector3d(&pointxyz, Homo2world*points_prev[j])==true)
+                {
+                    cloud_ptr->push_back(pointxyz);
+                }
             }
+            Homo2world = Homo2world*Curr2Prev;
+            cout<<"Point cloud size:"<<cloud_ptr->size()<<endl;
         }
-        Homo2world = Homo2world*Curr2Prev;
-          cout<<"Point cloud size:"<<cloud_ptr->size()<<endl;
+        else{
+                for(int j=i; j<img_name_left.size()-2;j++)
+                {
+                    img_previous_left = cv::imread(img_name_left[i],IMREAD_GRAYSCALE );
+                    img_previous_right = cv::imread(img_name_right[i],IMREAD_GRAYSCALE );
+                    img_current_left = cv::imread(img_name_left[j+2], IMREAD_GRAYSCALE);
+                    img_current_right = cv::imread(img_name_right[j+2], IMREAD_GRAYSCALE);
+                    points_prev.clear();
+                    if(TwoFramesImagesToCloudPoints( img_previous_left, img_previous_right, img_current_left,  img_current_right, camera, &points_prev, &Curr2Prev)==true)
+                    {
+                        // update homography
+                        i=j+2;
+                        for(int k=0; k < points_prev.size(); k++)
+                        {
+                            if(PointXYZ2Vector3d(&pointxyz, Homo2world*points_prev[k])==true)
+                            {
+                                cloud_ptr->push_back(pointxyz);
+                            }
+                        }
+                        Homo2world = Homo2world*Curr2Prev;
+                        cout<<"SKIP one frame: "<<i+1<<"; Point cloud size:"<<cloud_ptr->size()<<endl;
+                        break;
+                    }
+                }
+        }
+        string_print = (char) i;
+        viewer->addPointCloud<pcl::PointXYZ>( cloud_ptr,string_print);
+        pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(cloud_ptr, 0, 255, 0);
+        viewer->setPointCloudRenderingProperties(pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, string_print);
     }
-  
-    }
-    
-    
-    
-    
-    pcl::visualization::PCLVisualizer::Ptr viewer(new pcl::visualization::PCLVisualizer ("point cloud"));
-    viewer->setBackgroundColor(0,0,0);
-    viewer->addPointCloud<pcl::PointXYZ>( cloud_ptr,"current points");
-    pcl::visualization::PointCloudColorHandlerCustom<pcl::PointXYZ> single_color(cloud_ptr, 0, 255, 0);
-    viewer->setPointCloudRenderingProperties
-    (pcl::visualization::PCL_VISUALIZER_POINT_SIZE, 5, "current points");
-    viewer->addCoordinateSystem(1.0);
-    viewer->initCameraParameters();
     while (!viewer->wasStopped ())
     {
         viewer->spinOnce (100);
         boost::this_thread::sleep (boost::posix_time::microseconds (100000));
     }
-    
-    
-    
-    
-    
     waitKey(0);
     return 0;
 }

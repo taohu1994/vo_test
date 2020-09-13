@@ -7,6 +7,151 @@ using namespace cv;
 
 
 //bool RANSAC_3D3D(cv::)
+bool RANSAC_3D3D(vector<Eigen::Vector3d> *points_3d_prev, vector<Eigen::Vector3d> *points_3d_curr, Eigen::Matrix<double,3,3> *pose_rotation, Eigen::Vector3d *pose_transpose,double *projection_error_return, int *inliner_number_return)
+{
+    vector<Eigen::Vector3d> prev_points = *points_3d_prev;
+    vector<Eigen::Vector3d> curr_points = *points_3d_curr;
+    vector<Eigen::Vector3d> prev_points_inliner;
+    vector<Eigen::Vector3d> curr_points_inliner;
+    vector<Eigen::Vector3d> prev_points_inliner_final;
+    vector<Eigen::Vector3d> curr_points_inliner_final;
+    vector<Eigen::Vector3d> prev_point_temp, curr_point_temp;
+    vector<Eigen::Matrix<double,3,3>> R;
+    vector<Eigen::Vector3d> T;
+    Eigen::Matrix<double,3,3> rotation ;
+    Eigen::Vector3d transpose;
+    Eigen::Matrix<double,3,3> R_temp;
+    Eigen::Vector3d T_temp;
+    Eigen::Vector3d project_error_vector;
+    int num = prev_points.size();         
+    int K = 5;//iteration num
+    int inliner[K];
+    double threshold = 0.1;
+    int minimum_points_num = 10;
+    int N[minimum_points_num];
+    int projection_error[K];
+    double inliner_number_min = 0;
+    for(int k =0; k<K; k++)
+    {   
+        //Randomly select 7 points
+        prev_point_temp.clear();
+        curr_point_temp.clear();
+        for(int nn = 0; nn<minimum_points_num;nn++)
+        {
+            N[nn] = int(rand() % num);  
+            prev_point_temp.push_back(prev_points[N[nn]]);
+            curr_point_temp.push_back(curr_points[N[nn]]);
+        }
+        //Model fitting with 7 points
+
+        if(!ceres_modelfitting(prev_point_temp, curr_point_temp, &R_temp, &T_temp ))
+        {
+            return false;
+        }
+        //outliner detection
+        
+        inliner[k] = 0;
+        prev_points_inliner.clear();
+        curr_points_inliner.clear();
+        for(int i=0; i<num; i++)
+        {
+            project_error_vector = R_temp*prev_points[i] + T_temp-curr_points[i];
+            if(project_error_vector.norm()<threshold)
+            {
+                inliner[k]++;
+                prev_points_inliner.push_back(prev_points[i]);
+                curr_points_inliner.push_back(curr_points[i]);
+            }
+        }
+        //inliner refitting
+        projection_error[k] = 0;
+        prev_points_inliner_final.clear();
+        curr_points_inliner_final.clear();
+        if(prev_points_inliner.size()>=minimum_points_num)
+            if(!ceres_modelfitting(prev_points_inliner,curr_points_inliner,&R_temp,&T_temp))
+            {
+                return false;
+            }
+            R.push_back(R_temp);
+            T.push_back(T_temp);
+            for(int i=0; i<prev_points_inliner.size(); i++)
+            {
+                project_error_vector = R_temp*prev_points_inliner[i] + T_temp-curr_points_inliner[i];
+                if(project_error_vector.norm()<threshold)
+                {
+                    projection_error[k] += project_error_vector.norm();
+                    prev_points_inliner_final.push_back(prev_points_inliner[i]);
+                    curr_points_inliner_final.push_back(curr_points_inliner[i]);
+                }
+            }
+            if(inliner[k]>inliner_number_min)
+            {
+                inliner_number_min = inliner[k];
+                *points_3d_prev = prev_points_inliner_final;
+                *points_3d_curr = curr_points_inliner_final;
+                *pose_rotation = R_temp;
+                *pose_transpose = T_temp;
+                *projection_error_return = projection_error[k];
+                *inliner_number_return = prev_points_inliner_final.size();
+            }
+    }
+    return true;
+}
+bool ceres_modelfitting(vector<Eigen::Vector3d> points_3d_prev, vector<Eigen::Vector3d> points_3d_curr, Eigen::Matrix<double,3,3> *pose_rotation_return, Eigen::Vector3d *pose_transpose_return)
+{
+    ceres::Problem problem;
+    double prev_point[3];
+    double curr_point[3];
+    
+    double transpose_T[3];
+    double rotate_R[4];
+    rotate_R[0] = 1.0;
+    rotate_R[1] = 0.000000;
+    rotate_R[2] = 0.000000;
+    rotate_R[3] = 0.000000;;
+    transpose_T[0] = 0.00000;
+    transpose_T[1] = 0.00000;
+    transpose_T[2] = 0.00000;
+    for(int i=0; i < points_3d_prev.size(); i++)
+    {
+        prev_point[0] = points_3d_prev[i](0);
+        prev_point[1] = points_3d_prev[i](1);
+        prev_point[2] = points_3d_prev[i](2);
+        curr_point[0] = points_3d_curr[i](0);
+        curr_point[1] = points_3d_curr[i](1);
+        curr_point[2] = points_3d_curr[i](2);
+        ceres::CostFunction* cost_function = ProjectionError_3d3d::Create(curr_point,prev_point);
+        problem.AddResidualBlock(cost_function, NULL, rotate_R, transpose_T );
+    }
+    ceres::Solver::Options options;
+    options.linear_solver_type = ceres::DENSE_SCHUR;
+    options.max_num_iterations = 10000;
+    // options.gradient_tolerance = 1e-20;
+    //options.minimizer_progress_to_stdout = true;
+    ceres::Solver::Summary summary;
+    ceres::Solve(options, &problem, &summary);
+    //cout<<summary.BriefReport()<<endl;
+    if(!summary.IsSolutionUsable())
+    {
+    cout<<"UNCONVERGENCE!"<<endl;
+        return false;
+    }
+    double rotation_matrix[9];
+    ceres::QuaternionToRotation(rotate_R, rotation_matrix);
+    Eigen::Matrix<double,3,3> pose_rotation;
+    Eigen::Vector3d pose_tranpose;
+    for(int i=0;i<=2;i++)
+    {
+        pose_tranpose(i) = transpose_T[i];
+        for(int j=0;j<=2;j++)
+        {
+            pose_rotation(i,j) = rotation_matrix[3*i+j];
+        }
+    }
+    *pose_transpose_return = pose_tranpose;
+    *pose_rotation_return = pose_rotation;
+    return true;
+}
 
 /*function PixelPair23dPoint transfer the matched pairs of left and right pixel points to 3d points
  * 
@@ -20,30 +165,30 @@ bool ImgstringToLRandNUM(cv::String img_name, int *LoR, int *num)
 {
     std::vector<int> dot_place;
     std::string img_num;
-     for(int j=0; j< img_name.length(); j++)
-        {
-            
-            if(img_name[j]=='.')
-            {
-                dot_place.push_back(j);
-            }
-        }
-        if(dot_place.empty())
-        {
-            cout<<"WARNING:"<<img_name<<" has 0 dot"<<endl;
-            return false;
-        }
-        if(img_name[dot_place[0]+1] == 'l')
-        {*LoR = 1;}
-        if(img_name[dot_place[0]+1] == 'r')
-        {*LoR = 0;}
-        for(int j =0; j<(dot_place[2]-dot_place[1]-1); j++)
-        {
-            img_num[j] = img_name[dot_place[1]+1+j];
-        }
-         *num  = std::stoi (img_num,nullptr);
+    for(int j=0; j< img_name.length(); j++)
+    {
         
-        return true;
+        if(img_name[j]=='.')
+        {
+            dot_place.push_back(j);
+        }
+    }
+    if(dot_place.empty())
+    {
+        cout<<"WARNING:"<<img_name<<" has 0 dot"<<endl;
+        return false;
+    }
+    if(img_name[dot_place[0]+1] == 'l')
+    {*LoR = 1;}
+    if(img_name[dot_place[0]+1] == 'r')
+    {*LoR = 0;}
+    for(int j =0; j<(dot_place[2]-dot_place[1]-1); j++)
+    {
+        img_num[j] = img_name[dot_place[1]+1+j];
+    }
+    *num  = std::stoi (img_num,nullptr);
+    
+    return true;
 }
 
 bool Folder2LRimg(std::string folder, std::vector<std::string> *img_left, std::vector<std::string> *img_right, int NUM)
@@ -60,26 +205,26 @@ bool Folder2LRimg(std::string folder, std::vector<std::string> *img_left, std::v
     
     for (int i=0; i<img_string.size(); i++)
     {
-    
-        {
-        img_name = img_string[i];
-        ImgstringToLRandNUM(img_name, &LoR, &img_num);
-        img_num = img_num - 600;
-        if(LoR == 1)//left
-        {
-            if(img_num<NUM)
-            {
-            img_left_temp[img_num] = img_name;
-            }
-        }
-        else
-        {
-            if(img_num<NUM)
-            {
-            img_right_temp[img_num] = (img_name);
-            }
-        }
         
+        {
+            img_name = img_string[i];
+            ImgstringToLRandNUM(img_name, &LoR, &img_num);
+            img_num = img_num - 600;
+            if(LoR == 1)//left
+            {
+                if(img_num<NUM)
+                {
+                    img_left_temp[img_num] = img_name;
+                }
+            }
+            else
+            {
+                if(img_num<NUM)
+                {
+                    img_right_temp[img_num] = (img_name);
+                }
+            }
+            
         }
     }
     for(int i =0; i< NUM; i++)
@@ -92,11 +237,11 @@ bool Folder2LRimg(std::string folder, std::vector<std::string> *img_left, std::v
         }
         else
         {
-        img_left->push_back( img_left_temp[i]);
-        img_right->push_back(img_right_temp[i]);         
+            img_left->push_back( img_left_temp[i]);
+            img_right->push_back(img_right_temp[i]);         
         }
     }
-
+    
 }
 
 
@@ -114,18 +259,16 @@ bool PixelPair23dPoint(stereo_camera camera, cv::Point2d point_left, cv::Point2d
     double diff = double(point_left.x - point_right.x);
     double depth = focal_length*baseline/(diff*camera.pixel_size);
     Eigen::Vector3d point_3d;
-
-        point_homo(0) = point_left.x;
-        point_homo(1) = point_left.y;
-        point_homo(2) = 1.0;
-        point_3d(0) = (point_homo(0)*depth-Cx*depth)*pixel_size/focal_length;
-        point_3d(1) = (point_homo(1)*depth-Cy*depth)*pixel_size/focal_length;
-        point_3d(2) = depth;
-     //   cout<<"point_3d\n"<<point_3d<<endl;
-       // cout<<"K inverse\n"<<depth*K.inverse()*point_homo<<endl;
-        *points_3d = point_3d;
-        //points_3d = &point_3d;
-        return true;
+    
+    point_homo(0) = point_left.x;
+    point_homo(1) = point_left.y;
+    point_homo(2) = 1.0;
+    point_3d(0) = (point_homo(0)*depth-Cx*depth)*pixel_size/focal_length;
+    point_3d(1) = (point_homo(1)*depth-Cy*depth)*pixel_size/focal_length;
+    point_3d(2) = depth;
+    *points_3d = point_3d;
+    //points_3d = &point_3d;
+    return true;
 }
 
 
@@ -229,88 +372,36 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
     
     
     //3D-3D pose estimation
-    ceres::Problem problem;
-    double prev_point[3];
-    double curr_point[3];
     
-    double transpose_T[3];
-    /*double rotate_R[9];
-    rotate_R[0] = 1.0;
-    rotate_R[1] = 0.0000001;
-    rotate_R[2] = 0.0000001;
-    rotate_R[3] = 0.0000001;
-    rotate_R[4] = 1.0;
-    rotate_R[5] = 0.0000001;
-    rotate_R[6] = 0.0000001;
-    rotate_R[7] = 0.0000001;
-    rotate_R[8] = 1.0;*/
-    double rotate_R[4];
-    rotate_R[0] = 1.0;
-    rotate_R[1] = 0.0000001;
-    rotate_R[2] = 0.0000001;
-    rotate_R[3] = 0.0000001;;
-
     
-    transpose_T[0] = 0.000001;
-    transpose_T[1] = 0.000001;
-    transpose_T[2] = 0.000001;
-    for(int i=0; i < points_3d_prev.size(); i++)
-    {
-        prev_point[0] = points_3d_prev[i](0);
-        prev_point[1] = points_3d_prev[i](1);
-        prev_point[2] = points_3d_prev[i](2);
-        curr_point[0] = points_3d_curr[i](0);
-        curr_point[1] = points_3d_curr[i](1);
-        curr_point[2] = points_3d_curr[i](2);
-        ceres::CostFunction* cost_function = ProjectionError_3d3d::Create(curr_point,prev_point);
-        problem.AddResidualBlock(cost_function, NULL, rotate_R, transpose_T );
-    }
-    ceres::Solver::Options options;
-    options.linear_solver_type = ceres::DENSE_SCHUR;
-    options.max_num_iterations = 10000;
-    options.gradient_tolerance = 1e-20;
-    //options.minimizer_progress_to_stdout = true;
-    ceres::Solver::Summary summary;
-    ceres::Solve(options, &problem, &summary);
-    cout<<summary.BriefReport()<<endl;
     Eigen::Matrix<double,3,3> pose_rotation;
-    Eigen::Vector3d pose_tranpose;
-    
-     double rotation_matrix[9];
-    ceres::QuaternionToRotation(rotate_R, rotation_matrix);
-    
-    for(int i=0;i<=2;i++)
-    {
-        pose_tranpose(i) = transpose_T[i];
-        for(int j=0;j<=2;j++)
-        {
-            //pose_rotation(i,j) = rotate_R[3*i+j];
-            
-            pose_rotation(i,j) = rotation_matrix[3*i+j];
-        }
-    }
-    cout<<pose_tranpose<<endl;
-    cout<<pose_rotation<<endl;
+    Eigen::Vector3d pose_transpose;
+    double projection_error_ransac;
+    int inliner_number;
     //RANSAC outliner filtering
-    
-    for(int i=0; i<=points_3d_prev.size();i++)
+    if(!RANSAC_3D3D(&points_3d_prev, &points_3d_curr, &pose_rotation, &pose_transpose,&projection_error_ransac, &inliner_number))
     {
-        
+        return false;
     }
     
+    if(inliner_number<20)
+    {
+        return false;
+    }
     
     std::vector<Eigen::Vector4d> points_prev_homo;
     Eigen::Vector3d prev_point_3d;
     Eigen::Vector4d prev_point_4d;
     Eigen::Vector3d Project_error;
     int project_error_sum = 0;
+    
     for(int i=0; i < points_3d_prev.size(); i++)
     {
-       // prev_point_3d = pose_rotation.inverse()*(points_3d_curr[i]-pose_tranpose);
+        // prev_point_3d = pose_rotation.inverse()*(points_3d_curr[i]-pose_tranpose);
         prev_point_3d = points_3d_prev[i];
-        Project_error = (pose_rotation*points_3d_prev[i]+pose_tranpose-points_3d_prev[i]);
+        Project_error = (pose_rotation*points_3d_prev[i]+pose_transpose-points_3d_curr[i]);
         project_error_sum += Project_error.norm();
-        cout<<"projection_error +T:"<<Project_error.norm()<<endl;
+       // cout<<"projection_error +T:"<<Project_error.norm()<<endl;
         prev_point_4d(0) = prev_point_3d(0);
         prev_point_4d(1) = prev_point_3d(1);
         prev_point_4d(2) = prev_point_3d(2);
@@ -327,11 +418,11 @@ bool TwoFramesImagesToCloudPoints( cv::Mat img_previous_left, cv::Mat img_previo
     }
     HomoCurr2Prev(3,3) = 1;
     HomoCurr2Prev.block(0,0,3,3) = pose_rotation;
-    HomoCurr2Prev.block(0,3,3,1) = pose_tranpose;
-    *Curr2Prev = HomoCurr2Prev;
+    HomoCurr2Prev.block(0,3,3,1) = pose_transpose;
+    *Curr2Prev = HomoCurr2Prev.inverse();
     for(int i =0; i< points_prev_homo.size(); i++)
     {
-    points_prev->push_back(  points_prev_homo[i]);
+        points_prev->push_back(  points_prev_homo[i]);
     }
     return true;
 }
